@@ -82,3 +82,54 @@ export interface PaymentFilters {
   sort?: "createdAt" | "amount"
   direction?: "asc" | "desc"
 }
+
+export type CardStatus = "active" | "frozen" | "cancelled"
+
+/** The categories a card can be locked to at issue time. */
+export type MerchantCategory =
+  | "advertising"
+  | "software"
+  | "travel"
+  | "office_supplies"
+  | "contractors"
+  | "utilities"
+
+/**
+ * One step in a card's status history. Exists so "what happened to this card
+ * last Tuesday" has an answer that is not a guess.
+ */
+export interface CardStatusEvent {
+  /** Null on the issuing event, which has nothing before it. */
+  from: CardStatus | null
+  to: CardStatus
+  /** ISO 8601, always UTC. */
+  at: string
+}
+
+/**
+ * A virtual card.
+ *
+ * There is deliberately no field for the full number. It exists in exactly one
+ * place — the creation response — and the type is what enforces that: a list or
+ * detail payload structurally cannot carry a PAN.
+ */
+export interface Card {
+  id: string
+  nickname: string
+  merchantId: string
+  /** Integer minor units. Never a float. */
+  spendLimit: number
+  /** Integer minor units, in the same currency as the limit. */
+  spend: number
+  currency: Currency
+  status: CardStatus
+  /** Last four of the generated number. All that is ever stored of it. */
+  last4: string
+  /** Opaque handle for the generated number. Not the number, not derived from it. */
+  reference: string
+  /** Category the card is locked to. Null means no lock. */
+  categoryLock: MerchantCategory | null
+  /** ISO 8601, always UTC. */
+  createdAt: string
+  statusHistory: CardStatusEvent[]
+}
