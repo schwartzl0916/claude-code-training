@@ -24,7 +24,9 @@ import {
   CARD_CURRENCIES,
   CATEGORY_LABELS,
   MERCHANT_CATEGORIES,
+  groupCardNumber,
   maskCardNumber,
+  maxSpendLimitLabel,
 } from "@/lib/cards"
 import { formatMoney } from "@/lib/money"
 import { Plus } from "lucide-react"
@@ -33,9 +35,16 @@ import * as React from "react"
 
 type MerchantOption = { id: string; name: string; currency: Currency }
 
-/** Groups of four, for the one screen that shows the whole number. */
-function groupDigits(cardNumber: string): string {
-  return cardNumber.replace(/(\d{4})(?=\d)/g, "$1 ")
+/**
+ * The control the server's `field` names, so focus can land on the problem
+ * rather than leaving a keyboard user to hunt for the red one.
+ */
+const FIELD_IDS: Record<string, string> = {
+  nickname: "card-nickname",
+  merchantId: "card-merchant",
+  spendLimit: "card-limit",
+  currency: "card-currency",
+  categoryLock: "card-category",
 }
 
 const labelStyles =
@@ -69,6 +78,11 @@ export function IssueCardDialog({
     card: Card
     fullNumber: string
   } | null>(null)
+
+  const revealRef = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => {
+    if (issued) revealRef.current?.focus()
+  }, [issued])
 
   const reset = () => {
     setNickname("")
@@ -130,6 +144,10 @@ export function IssueCardDialog({
           field: body.field,
           message: body.message ?? "Could not issue the card.",
         })
+        const target = body.field ? FIELD_IDS[body.field] : undefined
+        if (target) {
+          requestAnimationFrame(() => document.getElementById(target)?.focus())
+        }
         return
       }
 
@@ -167,12 +185,17 @@ export function IssueCardDialog({
             </DrawerHeader>
 
             <DrawerBody className="flex flex-col gap-6 overflow-y-auto">
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900">
+              <div
+                ref={revealRef}
+                tabIndex={-1}
+                aria-live="polite"
+                className="rounded-lg border border-gray-200 bg-gray-50 p-4 outline-none dark:border-gray-800 dark:bg-gray-900"
+              >
                 <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                   Card number
                 </p>
                 <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-50">
-                  {groupDigits(issued.fullNumber)}
+                  {groupCardNumber(issued.fullNumber)}
                 </p>
                 <p className="mt-2 text-sm text-amber-700 dark:text-amber-500">
                   Once you close this, the console shows{" "}
@@ -237,6 +260,7 @@ export function IssueCardDialog({
                   }}
                   placeholder="Ad spend — Q4"
                   hasError={Boolean(fieldError("nickname"))}
+                  aria-invalid={Boolean(fieldError("nickname"))}
                   aria-describedby={
                     fieldError("nickname") ? "card-nickname-error" : undefined
                   }
@@ -259,6 +283,12 @@ export function IssueCardDialog({
                   <SelectTrigger
                     id="card-merchant"
                     hasError={Boolean(fieldError("merchantId"))}
+                    aria-invalid={Boolean(fieldError("merchantId"))}
+                    aria-describedby={
+                      fieldError("merchantId")
+                        ? "card-merchant-error"
+                        : undefined
+                    }
                   >
                     <SelectValue placeholder="Choose a merchant" />
                   </SelectTrigger>
@@ -271,7 +301,10 @@ export function IssueCardDialog({
                   </SelectContent>
                 </Select>
                 {fieldError("merchantId") && (
-                  <p className="text-sm text-red-600 dark:text-red-500">
+                  <p
+                    id="card-merchant-error"
+                    className="text-sm text-red-600 dark:text-red-500"
+                  >
                     {fieldError("merchantId")}
                   </p>
                 )}
@@ -293,10 +326,15 @@ export function IssueCardDialog({
                     }}
                     placeholder="2500.00"
                     hasError={Boolean(fieldError("spendLimit"))}
-                    aria-describedby="card-limit-hint"
+                    aria-invalid={Boolean(fieldError("spendLimit"))}
+                    aria-describedby={
+                      fieldError("spendLimit")
+                        ? "card-limit-error card-limit-hint"
+                        : "card-limit-hint"
+                    }
                   />
                   <p id="card-limit-hint" className="text-xs text-gray-500">
-                    In {currency}, up to 50,000.00
+                    In {currency}, up to {maxSpendLimitLabel(currency)}
                   </p>
                 </div>
 
@@ -311,6 +349,12 @@ export function IssueCardDialog({
                     <SelectTrigger
                       id="card-currency"
                       hasError={Boolean(fieldError("currency"))}
+                      aria-invalid={Boolean(fieldError("currency"))}
+                      aria-describedby={
+                        fieldError("currency")
+                          ? "card-currency-error"
+                          : undefined
+                      }
                     >
                       <SelectValue />
                     </SelectTrigger>
@@ -322,10 +366,21 @@ export function IssueCardDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                  {fieldError("currency") && (
+                    <p
+                      id="card-currency-error"
+                      className="text-sm text-red-600 dark:text-red-500"
+                    >
+                      {fieldError("currency")}
+                    </p>
+                  )}
                 </div>
               </div>
               {fieldError("spendLimit") && (
-                <p className="-mt-2 text-sm text-red-600 dark:text-red-500">
+                <p
+                  id="card-limit-error"
+                  className="-mt-2 text-sm text-red-600 dark:text-red-500"
+                >
                   {fieldError("spendLimit")}
                 </p>
               )}
@@ -339,6 +394,12 @@ export function IssueCardDialog({
                   <SelectTrigger
                     id="card-category"
                     hasError={Boolean(fieldError("categoryLock"))}
+                    aria-invalid={Boolean(fieldError("categoryLock"))}
+                    aria-describedby={
+                      fieldError("categoryLock")
+                        ? "card-category-error"
+                        : undefined
+                    }
                   >
                     <SelectValue placeholder="No lock" />
                   </SelectTrigger>
@@ -350,6 +411,14 @@ export function IssueCardDialog({
                     ))}
                   </SelectContent>
                 </Select>
+                {fieldError("categoryLock") && (
+                  <p
+                    id="card-category-error"
+                    className="text-sm text-red-600 dark:text-red-500"
+                  >
+                    {fieldError("categoryLock")}
+                  </p>
+                )}
                 <p className="text-xs text-gray-500">
                   The card declines anything outside the category it is locked
                   to.

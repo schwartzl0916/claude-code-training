@@ -17,10 +17,13 @@ import * as React from "react"
 export function CardStatusControl({
   cardId,
   status,
+  nickname,
   allowCancel = false,
 }: {
   cardId: string
   status: CardStatus
+  /** Names the card in the control's label: ten rows of "Freeze" name nothing. */
+  nickname: string
   /** Cancelling is irreversible, so it is opt-in and two-step. */
   allowCancel?: boolean
 }) {
@@ -63,7 +66,11 @@ export function CardStatusControl({
 
   if (!freezeTarget) {
     return (
-      <span className="text-sm text-gray-500">
+      <span
+        role="status"
+        tabIndex={-1}
+        className="text-sm text-gray-500 outline-none"
+      >
         Cancelled — no further changes
       </span>
     )
@@ -77,6 +84,9 @@ export function CardStatusControl({
           className="py-1"
           onClick={() => move(freezeTarget)}
           isLoading={pending === freezeTarget}
+          aria-label={`${
+            freezeTarget === "frozen" ? "Freeze" : "Unfreeze"
+          } ${nickname}`}
         >
           {freezeTarget === "frozen" ? "Freeze" : "Unfreeze"}
         </Button>
@@ -89,6 +99,7 @@ export function CardStatusControl({
                 className="py-1"
                 onClick={() => move("cancelled")}
                 isLoading={pending === "cancelled"}
+                aria-label={`Confirm cancelling ${nickname}`}
               >
                 Confirm cancel
               </Button>
@@ -105,6 +116,7 @@ export function CardStatusControl({
               variant="secondary"
               className="py-1"
               onClick={() => setConfirmingCancel(true)}
+              aria-label={`Cancel ${nickname}`}
             >
               Cancel card
             </Button>

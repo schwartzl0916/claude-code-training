@@ -4,6 +4,7 @@ import { SpendProgress } from "@/components/ui/cards/SpendProgress"
 import { StatusBadge } from "@/components/ui/payments/StatusBadge"
 import { cardById } from "@/data/cards"
 import { merchantById } from "@/data/merchants"
+import { CardStatus } from "@/data/types"
 import { CATEGORY_LABELS, maskCardNumber } from "@/lib/cards"
 import { formatInZone } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
@@ -13,7 +14,7 @@ import { notFound } from "next/navigation"
 /** In-memory store, and freezing a card has to show on the next render. */
 export const dynamic = "force-dynamic"
 
-const STATUS_VERBS: Record<string, string> = {
+const STATUS_VERBS: Record<CardStatus, string> = {
   active: "Activated",
   frozen: "Frozen",
   cancelled: "Cancelled",
@@ -56,7 +57,12 @@ export default async function CardDetail({
             {maskCardNumber(card.last4)} · {card.id}
           </p>
         </div>
-        <CardStatusControl cardId={card.id} status={card.status} allowCancel />
+        <CardStatusControl
+          cardId={card.id}
+          status={card.status}
+          nickname={card.nickname}
+          allowCancel
+        />
       </div>
 
       <Divider />

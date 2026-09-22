@@ -1,5 +1,5 @@
 import { Card, CardStatus, Currency, MerchantCategory } from "@/data/types"
-import { parseAmountToMinorUnits } from "./money"
+import { formatMoney, parseAmountToMinorUnits } from "./money"
 
 /**
  * Card rules, with no store and no framework behind them.
@@ -20,6 +20,15 @@ export const CARD_NUMBER_LENGTH = 16
 
 /** The ticket's ceiling, in minor units: 5,000,000 is $50,000.00. */
 export const MAX_SPEND_LIMIT_MINOR_UNITS = 5_000_000
+
+/**
+ * The ceiling as a user reads it. The form hint and the rejection message both
+ * come from here: a number shown twice has to be derived once, or changing the
+ * constant leaves one of them lying.
+ */
+export function maxSpendLimitLabel(currency: Currency): string {
+  return formatMoney(MAX_SPEND_LIMIT_MINOR_UNITS, currency)
+}
 
 /** The currency allowlist. Anything else from the client is rejected. */
 export const CARD_CURRENCIES: readonly Currency[] = ["USD", "EUR", "GBP"]
@@ -116,6 +125,11 @@ export function lastFour(cardNumber: string): string {
  */
 export function maskCardNumber(last4: string): string {
   return `•••• ${last4}`
+}
+
+/** Groups of four, for the one screen that shows a whole number. */
+export function groupCardNumber(cardNumber: string): string {
+  return cardNumber.replace(/(\d{4})(?=\d)/g, "$1 ")
 }
 
 // --- Status -----------------------------------------------------------------
@@ -239,6 +253,14 @@ export function validateIssueInput(
     return invalid("merchantId", "That merchant does not exist.")
   }
 
+  const currency = body.currency
+  if (!CARD_CURRENCIES.includes(currency as Currency)) {
+    return invalid(
+      "currency",
+      `Currency must be one of ${CARD_CURRENCIES.join(", ")}.`,
+    )
+  }
+
   const spendLimit = toMinorUnits(body.spendLimit)
   if (spendLimit === null) {
     return invalid("spendLimit", "Enter a limit like 250 or 250.00.")
@@ -249,15 +271,7 @@ export function validateIssueInput(
   if (spendLimit > MAX_SPEND_LIMIT_MINOR_UNITS) {
     return invalid(
       "spendLimit",
-      `The limit cannot exceed ${MAX_SPEND_LIMIT_MINOR_UNITS.toLocaleString()} minor units.`,
-    )
-  }
-
-  const currency = body.currency
-  if (!CARD_CURRENCIES.includes(currency as Currency)) {
-    return invalid(
-      "currency",
-      `Currency must be one of ${CARD_CURRENCIES.join(", ")}.`,
+      `The limit cannot exceed ${maxSpendLimitLabel(currency as Currency)}.`,
     )
   }
 

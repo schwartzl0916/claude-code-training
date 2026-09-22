@@ -7,11 +7,13 @@ import {
   canTransition,
   freezeToggleTarget,
   generateCardNumber,
+  groupCardNumber,
   isSpendElevated,
   isValidLuhn,
   lastFour,
   luhnCheckDigit,
   maskCardNumber,
+  maxSpendLimitLabel,
   spendRatio,
   validateIssueInput,
   validateStatusInput,
@@ -114,6 +116,38 @@ describe("masking", () => {
   it("renders the mask from the stored last four", () => {
     expect(maskCardNumber("1234")).toBe("•••• 1234")
     expect(maskCardNumber("4242")).toBe("•••• 4242")
+  })
+})
+
+describe("groupCardNumber", () => {
+  it("groups a generated number into fours for the one-time reveal", () => {
+    expect(groupCardNumber("4242000000001234")).toBe("4242 0000 0000 1234")
+  })
+
+  it("leaves a trailing group of four ungrouped, with no trailing space", () => {
+    expect(groupCardNumber("42420000")).toBe("4242 0000")
+    expect(groupCardNumber("4242")).toBe("4242")
+  })
+})
+
+describe("maxSpendLimitLabel", () => {
+  it("states the ceiling in the currency being issued", () => {
+    // The form hint and the rejection message both read from here, so they
+    // cannot drift apart or disagree about units.
+    expect(maxSpendLimitLabel("USD")).toBe("$50,000.00")
+    expect(maxSpendLimitLabel("EUR")).toBe("€50,000.00")
+    expect(maxSpendLimitLabel("GBP")).toBe("£50,000.00")
+  })
+
+  it("is derived from the constant the validator enforces", () => {
+    const rejected = validateIssueInput(
+      validBody({ spendLimit: MAX_SPEND_LIMIT_MINOR_UNITS + 1 }),
+      MERCHANT_IDS,
+    )
+    expect(rejected.ok).toBe(false)
+    expect(!rejected.ok && rejected.error.message).toContain(
+      maxSpendLimitLabel("USD"),
+    )
   })
 })
 
