@@ -1,9 +1,11 @@
 import {
+  CARD_STATUSES,
   IssueCardFields,
   canTransition,
   generateCardNumber,
   lastFour,
 } from "@/lib/cards"
+import { merchantById } from "./merchants"
 import { store } from "./store"
 import { Card, CardStatus } from "./types"
 
@@ -19,9 +21,79 @@ import { Card, CardStatus } from "./types"
  * are card reads, a different entity, and nothing here touches payments.
  */
 
-/** Newest first, which is the order ops wants to see an issue log in. */
-export function listCards(): Card[] {
-  return [...store.cards].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+export interface CardFilters {
+  status?: CardStatus | "all"
+  search?: string
+}
+
+const FILTER_STATUSES: readonly (CardStatus | "all")[] = [
+  "all",
+  ...CARD_STATUSES,
+]
+
+/**
+ * Narrowing that arrives from the client, checked against an allowlist before
+ * it reaches a read. Shaped after `parseFilters` in `queries.ts` rather than
+ * inventing a second convention for the same job.
+ */
+export function parseCardFilters(
+  params: Record<string, string | undefined>,
+): CardFilters {
+  const status = params.status
+  const search = params.search?.trim()
+  return {
+    status: FILTER_STATUSES.includes(status as CardStatus)
+      ? (status as CardStatus)
+      : "all",
+    search: search || undefined,
+  }
+}
+
+/**
+ * The one card filter. Searches the things ops actually types: the nickname
+ * they chose, the merchant, the last four off a statement line, and the id.
+ */
+function filterCards(filters: CardFilters): Card[] {
+  const { status, search } = filters
+  const needle = search?.toLowerCase()
+
+  return store.cards.filter((card) => {
+    if (status && status !== "all" && card.status !== status) return false
+
+    if (needle) {
+      const merchant = merchantById(card.merchantId)
+      const haystack = [
+        card.nickname,
+        card.last4,
+        card.id,
+        merchant?.name ?? "",
+      ]
+        .join(" ")
+        .toLowerCase()
+      if (!haystack.includes(needle)) return false
+    }
+
+    return true
+  })
+}
+
+/** Every issued card, unnarrowed. For counts and for the empty-state copy. */
+export function countCards(): number {
+  return store.cards.length
+}
+
+/**
+ * Newest first, which is the order ops wants to see an issue log in.
+ *
+ * Two cards issued in the same millisecond tie on `createdAt`, so the id
+ * breaks the tie: ids ascend with issue order, and without this the stable
+ * sort would leave the newer of the pair below the older one.
+ */
+export function listCards(filters: CardFilters = {}): Card[] {
+  return filterCards(filters).sort((a, b) => {
+    const byDate = b.createdAt.localeCompare(a.createdAt)
+    return byDate !== 0 ? byDate : b.id.localeCompare(a.id)
+  })
 }
 
 export function cardById(id: string): Card | null {

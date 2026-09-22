@@ -109,7 +109,7 @@ export function generateCardNumber(
 ): string {
   let payload = TEST_BIN
   while (payload.length < CARD_NUMBER_LENGTH - 1) {
-    payload += String(randomDigit() % 10)
+    payload += String(Math.abs(Math.trunc(randomDigit())) % 10)
   }
   return payload + String(luhnCheckDigit(payload))
 }
@@ -202,18 +202,54 @@ function invalid(field: string, message: string): Validated<never> {
 }
 
 /**
- * Convert a spend limit arriving from the client into integer minor units.
+ * Resolve the spend limit a request is asking for, in integer minor units.
  *
- * A string goes through `parseAmountToMinorUnits`, the codebase's one boundary
- * parser. A number is only accepted if it is already an integer count of minor
- * units — `250.5` is not a limit, it is a float that lost an argument.
+ * The two forms are deliberately separate fields rather than one field that
+ * changes meaning with its JSON type. `spendLimit: 250` and
+ * `spendLimit: "250"` would otherwise differ by a factor of a hundred, and a
+ * caller who meant $250.00 would silently get a $2.50 card — which is the
+ * wrong-limit failure this ticket exists to remove.
+ *
+ * - `spendLimit` is a string in major units, what the form sends. It goes
+ *   through `parseAmountToMinorUnits`, the codebase's one boundary parser.
+ * - `spendLimitMinorUnits` is the canonical machine form: an integer count of
+ *   minor units. `250.5` is not a limit, it is a float that lost an argument.
  */
-function toMinorUnits(raw: unknown): number | null {
-  if (typeof raw === "string") return parseAmountToMinorUnits(raw)
-  if (typeof raw === "number") {
-    return Number.isInteger(raw) ? raw : null
+function resolveSpendLimit(
+  body: Record<string, unknown>,
+): Validated<number> {
+  const major = body.spendLimit
+  const minor = body.spendLimitMinorUnits
+
+  const hasMajor = major !== undefined && major !== null && major !== ""
+  const hasMinor = minor !== undefined && minor !== null
+
+  if (hasMajor && hasMinor) {
+    return invalid(
+      "spendLimit",
+      "Send spendLimit or spendLimitMinorUnits, not both.",
+    )
   }
-  return null
+
+  if (hasMinor) {
+    if (typeof minor !== "number" || !Number.isInteger(minor)) {
+      return invalid(
+        "spendLimitMinorUnits",
+        "spendLimitMinorUnits must be a whole number of minor units.",
+      )
+    }
+    return { ok: true, value: minor }
+  }
+
+  if (typeof major !== "string") {
+    return invalid("spendLimit", "Enter a limit like 250 or 250.00.")
+  }
+
+  const parsed = parseAmountToMinorUnits(major)
+  if (parsed === null) {
+    return invalid("spendLimit", "Enter a limit like 250 or 250.00.")
+  }
+  return { ok: true, value: parsed }
 }
 
 /**
@@ -261,10 +297,9 @@ export function validateIssueInput(
     )
   }
 
-  const spendLimit = toMinorUnits(body.spendLimit)
-  if (spendLimit === null) {
-    return invalid("spendLimit", "Enter a limit like 250 or 250.00.")
-  }
+  const limit = resolveSpendLimit(body)
+  if (!limit.ok) return limit
+  const spendLimit = limit.value
   if (spendLimit <= 0) {
     return invalid("spendLimit", "The limit must be greater than zero.")
   }

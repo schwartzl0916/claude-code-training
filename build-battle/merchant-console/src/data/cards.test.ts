@@ -1,7 +1,17 @@
-import { isValidLuhn, lastFour, TEST_BIN } from "@/lib/cards"
+import {
+  IssueCardFields,
+  TEST_BIN,
+  isValidLuhn,
+  lastFour,
+} from "@/lib/cards"
 import { describe, expect, it } from "vitest"
-import { cardById, issueCard, listCards, transitionCard } from "./cards"
-import { IssueCardFields } from "@/lib/cards"
+import {
+  cardById,
+  issueCard,
+  listCards,
+  parseCardFilters,
+  transitionCard,
+} from "./cards"
 
 /**
  * The store-facing half of cards.
@@ -158,5 +168,76 @@ describe("transitionCard", () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(JSON.stringify(result.card)).not.toContain(fullNumber)
+  })
+})
+
+describe("parseCardFilters", () => {
+  it("defaults to every status and no search", () => {
+    expect(parseCardFilters({})).toEqual({ status: "all", search: undefined })
+  })
+
+  it("accepts the three statuses and the explicit all", () => {
+    for (const status of ["all", "active", "frozen", "cancelled"]) {
+      expect(parseCardFilters({ status }).status).toBe(status)
+    }
+  })
+
+  it("falls back to all rather than passing an unknown status to the read", () => {
+    // The allowlist is the point: nothing from the client reaches the filter
+    // without being checked first.
+    for (const status of ["deleted", "ACTIVE", "", "'; drop table --"]) {
+      expect(parseCardFilters({ status }).status, status).toBe("all")
+    }
+  })
+
+  it("trims a search and treats whitespace as absent", () => {
+    expect(parseCardFilters({ search: "  ad spend  " }).search).toBe("ad spend")
+    expect(parseCardFilters({ search: "   " }).search).toBeUndefined()
+    expect(parseCardFilters({ search: "" }).search).toBeUndefined()
+  })
+})
+
+describe("listCards filtering", () => {
+  it("narrows by status", () => {
+    const { card } = issueCard(fields({ nickname: "Filter probe" }))
+    transitionCard(card.id, "frozen")
+
+    const frozen = listCards({ status: "frozen" })
+    expect(frozen.map((c) => c.id)).toContain(card.id)
+    expect(frozen.every((c) => c.status === "frozen")).toBe(true)
+    expect(listCards({ status: "active" }).map((c) => c.id)).not.toContain(
+      card.id,
+    )
+  })
+
+  it("searches the nickname, the last four, and the id", () => {
+    const { card } = issueCard(fields({ nickname: "Unmistakable nickname" }))
+    expect(
+      listCards({ search: "unmistakable" }).map((c) => c.id),
+    ).toContain(card.id)
+    expect(listCards({ search: card.last4 }).map((c) => c.id)).toContain(
+      card.id,
+    )
+    expect(listCards({ search: card.id }).map((c) => c.id)).toContain(card.id)
+  })
+
+  it("returns nothing for a search that matches nothing, so the empty state is reachable", () => {
+    expect(listCards({ search: "zzz-no-such-card-zzz" })).toEqual([])
+  })
+
+  it("does not mutate the stored order while sorting", () => {
+    const before = listCards().map((c) => c.id)
+    listCards({ status: "active" })
+    expect(listCards().map((c) => c.id)).toEqual(before)
+  })
+
+  it("puts the newer of two cards issued in the same millisecond first", () => {
+    const first = issueCard(fields({ nickname: "Tie A" })).card
+    const second = issueCard(fields({ nickname: "Tie B" })).card
+    // Same-millisecond issuance is what a double submit looks like.
+    second.createdAt = first.createdAt
+
+    const ids = listCards().map((c) => c.id)
+    expect(ids.indexOf(second.id)).toBeLessThan(ids.indexOf(first.id))
   })
 })

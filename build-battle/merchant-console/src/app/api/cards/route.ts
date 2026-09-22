@@ -1,4 +1,4 @@
-import { issueCard, listCards } from "@/data/cards"
+import { issueCard, listCards, parseCardFilters } from "@/data/cards"
 import { merchants } from "@/data/merchants"
 import { validateIssueInput } from "@/lib/cards"
 import { NextRequest, NextResponse } from "next/server"
@@ -10,8 +10,13 @@ const MERCHANT_IDS = merchants.map((merchant) => merchant.id)
  * Every issued card. No full numbers here — `Card` has no field for one, so a
  * list payload structurally cannot leak a PAN.
  */
-export function GET() {
-  return NextResponse.json({ cards: listCards() })
+export function GET(request: NextRequest) {
+  // Narrowing goes through the same allowlist the page uses; an unknown
+  // status falls back to "all" rather than reaching the read.
+  const filters = parseCardFilters(
+    Object.fromEntries(request.nextUrl.searchParams),
+  )
+  return NextResponse.json({ cards: listCards(filters) })
 }
 
 /**

@@ -95,20 +95,21 @@ export function IssueCardDialog({
     setSubmitting(false)
   }
 
-  const close = () => {
-    setOpen(false)
-    // Drop the number before the drawer's close animation finishes.
-    reset()
-    router.refresh()
-  }
-
   const onOpenChange = (next: boolean) => {
     setOpen(next)
     if (!next) {
+      // Drop the number before the drawer's close animation finishes.
       reset()
       router.refresh()
     }
   }
+
+  /**
+   * Done on the reveal screen. Delegates rather than repeating the teardown,
+   * so Escape, the overlay, the close button and this button cannot drift
+   * apart on the one screen where the number must not survive.
+   */
+  const close = () => onOpenChange(false)
 
   /** Picking a merchant proposes its own currency; ops can still override it. */
   const onMerchantChange = (id: string) => {

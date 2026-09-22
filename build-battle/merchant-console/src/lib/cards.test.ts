@@ -30,6 +30,10 @@ const validBody = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
+/** The machine form: minor units under their own field name. */
+const minorBody = (minor: unknown, overrides: Record<string, unknown> = {}) =>
+  validBody({ spendLimit: undefined, spendLimitMinorUnits: minor, ...overrides })
+
 describe("generateCardNumber", () => {
   it("produces 16 digits on the 4242 test BIN with a valid Luhn check digit", () => {
     const number = generateCardNumber()
@@ -61,23 +65,28 @@ describe("generateCardNumber", () => {
   })
 
   it("never emits a number that is not on the test BIN", () => {
-    // A digit source that misbehaves must not be able to move the BIN.
-    const number = generateCardNumber(() => 42)
-    expect(number.startsWith(TEST_BIN)).toBe(true)
-    expect(number).toMatch(/^\d{16}$/)
-    expect(isValidLuhn(number)).toBe(true)
+    // A digit source that misbehaves must not be able to move the BIN or put
+    // a non-digit in the payload. A negative return used to produce "-2".
+    for (const source of [() => 42, () => -2, () => -0.5, () => 7.9]) {
+      const number = generateCardNumber(source)
+      expect(number.startsWith(TEST_BIN)).toBe(true)
+      expect(number).toMatch(/^\d{16}$/)
+      expect(isValidLuhn(number)).toBe(true)
+    }
   })
 })
 
 describe("isValidLuhn", () => {
   it("accepts known-good test numbers", () => {
+    // Test BIN only, here as everywhere: rules/cards.md forbids anything
+    // resembling a real PAN in fixtures as well as in code.
     expect(isValidLuhn("4242424242424242")).toBe(true)
-    expect(isValidLuhn("79927398713")).toBe(true)
+    expect(isValidLuhn("4242000000000000")).toBe(true)
   })
 
   it("rejects a number with a wrong check digit", () => {
     expect(isValidLuhn("4242424242424243")).toBe(false)
-    expect(isValidLuhn("79927398714")).toBe(false)
+    expect(isValidLuhn("4242000000000001")).toBe(false)
   })
 
   it("rejects anything that is not all digits", () => {
@@ -141,7 +150,7 @@ describe("maxSpendLimitLabel", () => {
 
   it("is derived from the constant the validator enforces", () => {
     const rejected = validateIssueInput(
-      validBody({ spendLimit: MAX_SPEND_LIMIT_MINOR_UNITS + 1 }),
+      minorBody(MAX_SPEND_LIMIT_MINOR_UNITS + 1),
       MERCHANT_IDS,
     )
     expect(rejected.ok).toBe(false)
@@ -247,32 +256,77 @@ describe("validateIssueInput", () => {
     expect(!result.ok && result.error.field).toBe("nickname")
   })
 
-  it("rejects a zero or negative limit", () => {
-    for (const spendLimit of ["0", "0.00", 0, -1, -25_000]) {
+  it("accepts the machine form under its own field name", () => {
+    const result = validateIssueInput(minorBody(25_000), MERCHANT_IDS)
+    expect(result.ok && result.value.spendLimit).toBe(25_000)
+  })
+
+  it("rejects a zero or negative limit in either form", () => {
+    for (const spendLimit of ["0", "0.00"]) {
       const result = validateIssueInput(validBody({ spendLimit }), MERCHANT_IDS)
       expect(result.ok, `spendLimit ${spendLimit}`).toBe(false)
+      expect(!result.ok && result.error.field).toBe("spendLimit")
+    }
+    for (const minor of [0, -1, -25_000]) {
+      const result = validateIssueInput(minorBody(minor), MERCHANT_IDS)
+      expect(result.ok, `spendLimitMinorUnits ${minor}`).toBe(false)
       expect(!result.ok && result.error.field).toBe("spendLimit")
     }
   })
 
   it("rejects a limit above 5,000,000 minor units but accepts the ceiling", () => {
     const over = validateIssueInput(
-      validBody({ spendLimit: MAX_SPEND_LIMIT_MINOR_UNITS + 1 }),
+      minorBody(MAX_SPEND_LIMIT_MINOR_UNITS + 1),
       MERCHANT_IDS,
     )
     expect(over.ok).toBe(false)
     expect(!over.ok && over.error.field).toBe("spendLimit")
 
     const at = validateIssueInput(
-      validBody({ spendLimit: MAX_SPEND_LIMIT_MINOR_UNITS }),
+      minorBody(MAX_SPEND_LIMIT_MINOR_UNITS),
       MERCHANT_IDS,
     )
     expect(at.ok).toBe(true)
+
+    // The same ceiling via the typed form, to the cent either side of it.
+    expect(
+      validateIssueInput(validBody({ spendLimit: "50000.00" }), MERCHANT_IDS).ok,
+    ).toBe(true)
+    expect(
+      validateIssueInput(validBody({ spendLimit: "50000.01" }), MERCHANT_IDS).ok,
+    ).toBe(false)
   })
 
-  it("rejects a limit that is not an integer count of minor units", () => {
+  it("rejects minor units that are not a whole number", () => {
+    const result = validateIssueInput(minorBody(250.5), MERCHANT_IDS)
+    expect(result.ok).toBe(false)
+    expect(!result.ok && result.error.field).toBe("spendLimitMinorUnits")
+  })
+
+  it("will not read a bare number as a limit", () => {
+    // The whole point of the two field names. `spendLimit: 250` once meant
+    // $2.50 while `spendLimit: "250"` meant $250.00 — a hundredfold
+    // difference on the field this ticket exists to get right.
     const result = validateIssueInput(
-      validBody({ spendLimit: 250.5 }),
+      validBody({ spendLimit: 250 }),
+      MERCHANT_IDS,
+    )
+    expect(result.ok).toBe(false)
+    expect(!result.ok && result.error.field).toBe("spendLimit")
+  })
+
+  it("refuses both forms at once rather than picking one", () => {
+    const result = validateIssueInput(
+      validBody({ spendLimit: "250.00", spendLimitMinorUnits: 999 }),
+      MERCHANT_IDS,
+    )
+    expect(result.ok).toBe(false)
+    expect(!result.ok && result.error.message).toContain("not both")
+  })
+
+  it("requires a limit at all", () => {
+    const result = validateIssueInput(
+      validBody({ spendLimit: undefined }),
       MERCHANT_IDS,
     )
     expect(result.ok).toBe(false)

@@ -33,6 +33,19 @@ export function CardStatusControl({
   const [error, setError] = React.useState<string | null>(null)
   const [confirmingCancel, setConfirmingCancel] = React.useState(false)
 
+  /**
+   * Set only when this control drove the card into its terminal state. The
+   * button holding focus unmounts on that transition, so the replacement has
+   * to take focus or it falls to the document — and the live region is scoped
+   * to the same flag, so statically rendered cancelled rows are not announced.
+   */
+  const [justCancelled, setJustCancelled] = React.useState(false)
+  const terminalRef = React.useRef<HTMLSpanElement>(null)
+
+  React.useEffect(() => {
+    if (justCancelled) terminalRef.current?.focus()
+  }, [justCancelled])
+
   // A server refresh is the authority; follow it if it disagrees.
   React.useEffect(() => {
     setCurrent(status)
@@ -54,6 +67,7 @@ export function CardStatusControl({
       }
       setCurrent(body.card.status)
       setConfirmingCancel(false)
+      if (body.card.status === "cancelled") setJustCancelled(true)
       router.refresh()
     } catch {
       setError("Could not reach the server. The card is unchanged.")
@@ -67,8 +81,9 @@ export function CardStatusControl({
   if (!freezeTarget) {
     return (
       <span
-        role="status"
+        ref={terminalRef}
         tabIndex={-1}
+        role={justCancelled ? "status" : undefined}
         className="text-sm text-gray-500 outline-none"
       >
         Cancelled — no further changes

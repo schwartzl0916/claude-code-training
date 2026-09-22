@@ -5,7 +5,7 @@
 
 **Ticket:** [NWP-201](../tickets/NWP-201.md)
 **Author:** jacob.schwartz@teradyne.com
-**Status:** draft
+**Status:** built — see *Departures from this plan* at the end for where the code and this document differ, and why
 
 ## Problem
 
@@ -64,27 +64,31 @@ The routes stay thin, the way `src/app/api/payments/route.ts` is thin. `POST /ap
 
 Money crosses the boundary exactly once: the dialog sends the limit as the string the user typed, and the route converts it with the existing `parseAmountToMinorUnits` and then range-checks the integer. The client never does arithmetic on it.
 
+The two representations get **two field names**, not one field that changes meaning with its JSON type. `spendLimit` is a string in major units — what a form sends — and `spendLimitMinorUnits` is an integer count of minor units, the canonical machine form. Sending both is a 400. One field accepting either would make `spendLimit: 250` and `spendLimit: "250"` differ by a factor of a hundred, and a caller who meant $250.00 would silently get a $2.50 card, which is the exact wrong-limit failure the ticket was filed to remove.
+
 **Considered and rejected:** generating the number in the dialog to skip a round trip — `.claude/rules/cards.md` names that as a bug outright. Also rejected: a Server Action for issuing, which would be idiomatic Next 15 but leaves the one-time reveal in a component's state rather than in a single HTTP response, and gives the grader no route to curl.
 
 ## File map
 
 | File | Add or change | Why |
 | --- | --- | --- |
-| `merchant-console/src/lib/cards.ts` | Add | Pure: Luhn generator on the `4242` BIN, mask, transition table, validator, `MAX_SPEND_LIMIT_MINOR_UNITS` |
-| `merchant-console/src/lib/cards.test.ts` | Add | Generator (BIN, length, Luhn, 1000 iterations), transitions incl. terminal `cancelled`, validator boundaries |
+| `merchant-console/src/lib/cards.ts` | Add | Pure: Luhn generator on the `4242` BIN, `maskCardNumber`, `groupCardNumber`, transition table, validator, `MAX_SPEND_LIMIT_MINOR_UNITS` and `maxSpendLimitLabel`, `CATEGORY_LABELS` |
+| `merchant-console/src/lib/cards.test.ts` | Add | Generator (BIN, length, Luhn, 1000 iterations, hostile digit sources), transitions incl. terminal `cancelled`, spend ratio and the 80% threshold, both limit forms, every validation boundary |
 | `merchant-console/src/data/types.ts` | Change | `CardStatus`, `MerchantCategory`, `Card`, `CardStatusEvent`; reuse existing `Currency` |
-| `merchant-console/src/data/cards.ts` | Add | Seed array + `listCards`, `cardById`, `issueCard`, `transitionCard`. The only place a PAN exists |
+| `merchant-console/src/data/cards-seed.ts` | Add | Seed rows and the boot-time number generation. Separate from `cards.ts` — see departures |
+| `merchant-console/src/data/cards.ts` | Add | `listCards`, `cardById`, `countCards`, `parseCardFilters`, `issueCard`, `transitionCard`. The only place a PAN exists |
+| `merchant-console/src/data/cards.test.ts` | Add | `issueCard`/`transitionCard` against the real store, the filter allowlist, and the list's ordering tie-break |
 | `merchant-console/src/data/store.ts` | Change | `cards: Card[]` on `Store` and in `createStore()`, so writes survive dev-server reloads |
-| `merchant-console/src/app/api/cards/route.ts` | Add | `GET` list, `POST` issue — validates, returns `201 {card, fullNumber}` |
-| `merchant-console/src/app/api/cards/[id]/route.ts` | Add | `GET` detail, `PATCH` status transition, guarded server-side |
-| `merchant-console/src/app/cards/page.tsx` | Add | `/cards` list: nickname, merchant, masked number, limit, status, created date + written empty state |
-| `merchant-console/src/app/cards/[id]/page.tsx` | Add | Detail: full record, spend against limit, status history |
-| `merchant-console/src/components/ui/cards/IssueCardDialog.tsx` | Add | Client form on `Drawer`, labelled inputs, server errors shown, one-time reveal on success |
-| `merchant-console/src/components/ui/cards/CardStatusControl.tsx` | Add | Client freeze/unfreeze via `PATCH`, no reload |
-| `merchant-console/src/components/ui/cards/SpendProgress.tsx` | Add | Bar, amber past 80%, accessible as a `progressbar` |
+| `merchant-console/src/app/api/cards/route.ts` | Add | `GET` list (narrowed through `parseCardFilters`), `POST` issue — validates, returns `201 {card, fullNumber}` |
+| `merchant-console/src/app/api/cards/[id]/route.ts` | Add | `GET` detail, `PATCH` status transition, guarded server-side, `409` on an illegal move |
+| `merchant-console/src/app/cards/page.tsx` | Add | `/cards` list: the six columns, status tabs, a zero-JS GET search form, and two distinct empty states |
+| `merchant-console/src/app/cards/[id]/page.tsx` | Add | Detail: full record, spend against limit, status history, two-step cancel |
+| `merchant-console/src/components/ui/cards/IssueCardDialog.tsx` | Add | Client form on `Drawer`, labelled inputs, field-level server errors, one-time reveal |
+| `merchant-console/src/components/ui/cards/CardStatusControl.tsx` | Add | Client freeze/unfreeze via `PATCH`, no reload; cancel on detail only |
+| `merchant-console/src/components/ui/cards/SpendProgress.tsx` | Add | Bar, amber past 80%, exposed as a `progressbar` |
 | `merchant-console/src/components/ui/payments/StatusBadge.tsx` | Change | Extend `AnyStatus` with `CardStatus` rather than adding a second badge |
 | `merchant-console/src/app/siteConfig.ts` | Change | `baseLinks.cards = "/cards"` |
-| `merchant-console/src/components/ui/navigation/AppSidebar.tsx` | Change | Cards nav entry (`CreditCard` is taken by Payments; use `Wallet`) |
+| `merchant-console/src/components/ui/navigation/Breadcrumbs.tsx` | Change | `cards: "Cards"` in `LABELS`, or the new route renders its raw path segment |
 
 ## Plan
 
@@ -94,7 +98,7 @@ Server first, checked, then the UI — a dialog over a route that does not work 
 2. Types, `cards` on the store, `src/data/cards.ts` with seed rows (varied status, one seeded past 80% spend so the amber threshold is visible without clicking).
 3. The two route files. Verify with `curl`: a good `POST` returns `201` with a `4242…` number, and each rejected case returns `400` with a message.
 4. `/cards` list, then `/cards/[id]` detail, then the issue dialog with its one-time reveal, then the freeze control.
-5. Read the diff. `org-standards` on it, `/ship-ready`, `npm test`, `npm run build`.
+5. Read the diff. `org-standards` on it, `/ship-ready`, `npm test`, `npm run lint`, `npm run build`.
 
 ## Acceptance criteria → where it lives
 
@@ -104,12 +108,24 @@ Server first, checked, then the UI — a dialog over a route that does not work 
 | `/cards` list with the six columns | `src/app/cards/page.tsx` | browser |
 | Card detail with spend against limit | `src/app/cards/[id]/page.tsx`, `SpendProgress.tsx` | browser |
 | Numbers server-side, `4242` BIN, valid Luhn | `generateCardNumber` in `src/lib/cards.ts` | `cards.test.ts`, 1000 iterations |
-| Reveal once, mask forever | `issueCard` returns the PAN outside the `Card`; `maskCardNumber` everywhere | test that `Card` has no PAN field; curl `GET` |
+| Reveal once, mask forever | `issueCard` returns the PAN outside the `Card`; `maskCardNumber` everywhere | `data/cards.test.ts` asserts no value on the record equals the PAN; curl `GET` |
 | Server-side validation (merchant, limit ≤ 5,000,000, currency) | `validateIssueInput` in `src/lib/cards.ts`, called by the route | `cards.test.ts` + curl per case |
+| Empty and error states | Two states in `cards/page.tsx`; field errors in the dialog | reachable via `?search=` with no match |
 
 ## Out of scope
 
 Persistence (NWP-203), auth, real issuer calls, editing a limit after issue (NWP-202). No database, no ORM, no migrations.
+
+## Departures from this plan
+
+Written after the build. A departure is not a failure; an unexplained one is.
+
+- **The seed moved to its own module.** The file map put it in `src/data/cards.ts`. The store has to import the seed while the query module imports the store, so keeping both in one file is an import cycle. Seed rows and the boot-time generation live in `src/data/cards-seed.ts`, mirroring how `merchants.ts` is data and `queries.ts` is reads.
+- **`CATEGORY_LABELS` lives in `src/lib/cards.ts`, not the dialog.** It started in `IssueCardDialog.tsx`, but the list and detail pages are server components and importing a constant across a `"use client"` boundary to get it is the wrong direction. It sits beside `MERCHANT_CATEGORIES`, the list it labels.
+- **`maxSpendLimitLabel` and `groupCardNumber` were not in the plan.** Both came out of review. The first exists because the form hint and the rejection message were two hardcoded spellings of one constant and had already drifted into different units; the second because a card-number formatter in a component is the thing `maskCardNumber` in `src/lib/` exists not to be.
+- **The limit takes two field names.** The plan said the limit "crosses as the string that was typed". It still does from the form, but the route also accepts `spendLimitMinorUnits`, because a single field that reads a string as major units and a number as minor units is a hundredfold ambiguity on the one value this ticket is about. See *Approach*.
+- **Status tabs and a search box were added to the list.** Not in the ticket. Both go through `parseCardFilters`, an allowlist in the shape of `parseFilters` in `queries.ts`, and they are what makes the "no cards match" empty state reachable at all — with four seed cards the list is otherwise never empty, so the written state could never be seen.
+- **`src/data/cards.test.ts` was added.** The plan only listed `lib/cards.test.ts`. `transitionCard` is the guard rule 3 actually rests on, and it was covered by curl but not by a test.
 
 ## Open questions
 
